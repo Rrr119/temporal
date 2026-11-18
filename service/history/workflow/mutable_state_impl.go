@@ -1497,7 +1497,14 @@ func (ms *MutableStateImpl) CurrentTaskQueue() *taskqueuepb.TaskQueue {
 	}
 }
 
-func (ms *MutableStateImpl) SetSessionState(state *persistencespb.SessionState) {
+// BindExclusiveWorker binds the workflow to an exclusive worker's stable identity.
+func (ms *MutableStateImpl) BindExclusiveWorker(stableIdentity string) {
+	ms.setSessionState(&persistencespb.SessionState{ExclusiveWorker: true, WorkerQueue: stableIdentity})
+}
+
+// setSessionState writes the session state and mirrors its location in the sticky queue. Callers outside mutable
+// state go through BindExclusiveWorker, so the mirror and the exclusive binding hold.
+func (ms *MutableStateImpl) setSessionState(state *persistencespb.SessionState) {
 	current := ms.executionInfo.GetSessionState()
 	if current.GetExclusiveWorker() &&
 		(!state.GetExclusiveWorker() || state.GetWorkerQueue() != current.GetWorkerQueue()) {
