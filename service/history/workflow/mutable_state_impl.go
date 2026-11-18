@@ -716,6 +716,11 @@ func (ms *MutableStateImpl) ChasmSkipPersistenceEnabled() bool {
 		ms.config.EnableCHASMSkipPersistence(ms.GetNamespaceEntry().Name().String())
 }
 
+func (ms *MutableStateImpl) chasmSkipNoopTransactionEnabled() bool {
+	return ms.config.EnableCHASMSkipNoopTransaction != nil &&
+		ms.config.EnableCHASMSkipNoopTransaction(ms.GetNamespaceEntry().Name().String())
+}
+
 // ChasmLogicalTaskCountAlertThreshold implements chasm.NodeBackend.
 func (ms *MutableStateImpl) ChasmLogicalTaskCountAlertThreshold(chasmTaskType string) int {
 	if ms.config.ChasmLogicalTaskCountAlertThreshold == nil {
@@ -7788,9 +7793,31 @@ func (ms *MutableStateImpl) CloseTransactionAsMutation(
 	ctx context.Context,
 	transactionPolicy historyi.TransactionPolicy,
 ) (*persistence.WorkflowMutation, []*persistence.WorkflowEvents, error) {
-	result, err := ms.closeTransaction(ctx, transactionPolicy)
+	return ms.closeTransactionAsMutation(ctx, transactionPolicy, false)
+}
+
+func (ms *MutableStateImpl) CloseTransactionAsMutationSkipIfNoop(
+	ctx context.Context,
+	transactionPolicy historyi.TransactionPolicy,
+) (*persistence.WorkflowMutation, []*persistence.WorkflowEvents, error) {
+	return ms.closeTransactionAsMutation(ctx, transactionPolicy, true)
+}
+
+func (ms *MutableStateImpl) closeTransactionAsMutation(
+	ctx context.Context,
+	transactionPolicy historyi.TransactionPolicy,
+	skipIfNoop bool,
+) (*persistence.WorkflowMutation, []*persistence.WorkflowEvents, error) {
+	result, err := ms.closeTransaction(ctx, transactionPolicy, skipIfNoop)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	if result.skipped {
+		if err := ms.cleanupTransaction(); err != nil {
+			return nil, nil, err
+		}
+		return nil, nil, nil
 	}
 
 	workflowMutation := &persistence.WorkflowMutation{
@@ -7834,7 +7861,7 @@ func (ms *MutableStateImpl) CloseTransactionAsSnapshot(
 	ctx context.Context,
 	transactionPolicy historyi.TransactionPolicy,
 ) (*persistence.WorkflowSnapshot, []*persistence.WorkflowEvents, error) {
-	result, err := ms.closeTransaction(ctx, transactionPolicy)
+	result, err := ms.closeTransaction(ctx, transactionPolicy, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -7920,6 +7947,9 @@ type closeTransactionResult struct {
 	clearBuffer        bool
 	checksum           *persistencespb.Checksum
 	chasmNodesMutation chasm.NodesMutation
+	// skipped is true when the transaction had nothing to persist and the caller allowed skipping it. No other field is
+	// set, and the in-memory state still matches the DB.
+	skipped bool
 }
 
 func (ms *MutableStateImpl) SetContextMetadata(
@@ -7956,6 +7986,7 @@ func (ms *MutableStateImpl) SetContextMetadata(
 func (ms *MutableStateImpl) closeTransaction(
 	ctx context.Context,
 	transactionPolicy historyi.TransactionPolicy,
+	skipIfNoop bool,
 ) (closeTransactionResult, error) {
 	ms.SetContextMetadata(ctx)
 
@@ -8018,6 +8049,12 @@ func (ms *MutableStateImpl) closeTransaction(
 	// mutation/snapshot below. Gating (active + attached-this-transaction) lives in the helper.
 	ms.closeTransactionSweepChasmRequestIDs(transactionPolicy)
 
+	// Decide before the transition history, transition count, and DB record version are bumped below, so a skipped
+	// transaction leaves the in-memory state identical to the DB.
+	if skipIfNoop && ms.closeTransactionIsNoop(transactionPolicy, chasmNodesMutation) {
+		return closeTransactionResult{skipped: true}, nil
+	}
+
 	if isStateDirty {
 		if err := ms.closeTransactionUpdateTransitionHistory(
 			transactionPolicy,
@@ -8072,6 +8109,39 @@ func (ms *MutableStateImpl) closeTransaction(
 		checksum:           checksum,
 		chasmNodesMutation: chasmNodesMutation,
 	}, nil
+}
+
+// closeTransactionIsNoop reports whether an active CHASM transaction has nothing to persist. It must be called after
+// the CHASM tree's CloseTransaction, since only the tree's mutation tells whether any node changed.
+//
+// Changes outside the tree are detected through dirty flags, so a change made without setting one would be dropped.
+// Skipping is therefore limited to callers that opt in and only change the CHASM tree, i.e. CHASM engine updates. It
+// never applies to replication or conflict resolution, where local-only changes such as turning a run into a zombie
+// don't set a dirty flag.
+func (ms *MutableStateImpl) closeTransactionIsNoop(
+	transactionPolicy historyi.TransactionPolicy,
+	chasmNodesMutation chasm.NodesMutation,
+) bool {
+	if transactionPolicy != historyi.TransactionPolicyActive ||
+		ms.IsWorkflow() ||
+		!ms.chasmSkipNoopTransactionEnabled() {
+		return false
+	}
+
+	// The CHASM tree resets its dirty state when it closes, so isStateDirty only reports changes outside the tree,
+	// including those the tree made through the backend.
+	if len(chasmNodesMutation.UpdatedNodes) != 0 ||
+		len(chasmNodesMutation.DeletedNodes) != 0 ||
+		ms.isStateDirty() {
+		return false
+	}
+
+	if ms.isNonChasmDirty() {
+		softassert.Fail(ms.logger, "CHASM transaction without state changes generated tasks")
+		// Persist rather than drop the tasks.
+		return false
+	}
+	return true
 }
 
 func (ms *MutableStateImpl) closeTransactionAccrueStorageUsage(

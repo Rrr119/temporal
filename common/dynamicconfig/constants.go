@@ -3498,6 +3498,14 @@ Requires service restart to take effect.`,
 This optimization should only be enabled after every cluster that may receive CHASM replication supports invalidating
 hydrated ancestor components when applying child-node mutations.`,
 	)
+	EnableCHASMSkipNoopTransaction = NewNamespaceBoolSetting(
+		"history.enableCHASMSkipNoopTransaction",
+		false,
+		`EnableCHASMSkipNoopTransaction controls whether an active CHASM engine update that has nothing to persist skips
+the mutable state write. A transaction has nothing to persist when the CHASM tree mutation is empty, no tasks were
+generated, and no execution level state changed. Most effective together with history.enableCHASMSkipPersistence,
+which omits CHASM nodes whose serialized data is unchanged.`,
+	)
 
 	ChasmDLQScheduledPureTaskOnValidation = NewNamespaceBoolSetting(
 		"history.chasmDLQScheduledPureTaskOnValidation",

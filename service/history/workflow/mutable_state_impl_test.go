@@ -51,6 +51,7 @@ import (
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/nexus/nexusrpc"
 	"go.temporal.io/server/common/payloads"
+	"go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/common/persistence/transitionhistory"
 	"go.temporal.io/server/common/persistence/versionhistory"
 	"go.temporal.io/server/common/primitives/timestamp"
@@ -6092,6 +6093,223 @@ func (s *mutableStateSuite) TestCloseTransactionGenerateCHASMRetentionTask_Workf
 	mutation, _, err := mutableState.CloseTransactionAsMutation(context.Background(), historyi.TransactionPolicyActive)
 	s.NoError(err)
 	s.Empty(mutation.Tasks[tasks.CategoryTimer])
+}
+
+// newChasmNoopMutableState returns a mutable state in an open transaction whose CHASM tree reports itself dirty, as it
+// does after a component is accessed for mutation, and returns the given mutation when its transaction is closed.
+func (s *mutableStateSuite) newChasmNoopMutableState(
+	archetypeID chasm.ArchetypeID,
+	chasmMutation chasm.NodesMutation,
+	onTreeClose func(*MutableStateImpl),
+) *MutableStateImpl {
+	dbState := s.buildWorkflowMutableState()
+	mutableState, err := NewMutableStateFromDB(s.mockShard, s.mockEventsCache, s.logger, s.namespaceEntry, dbState, 123)
+	s.NoError(err)
+
+	// First close transaction once to get rid of unrelated tasks like UserTimer and ActivityTimeout.
+	_, err = mutableState.StartTransaction(s.namespaceEntry)
+	s.NoError(err)
+	_, _, err = mutableState.CloseTransactionAsMutation(context.Background(), historyi.TransactionPolicyActive)
+	s.NoError(err)
+	_, err = mutableState.StartTransaction(s.namespaceEntry)
+	s.NoError(err)
+
+	mockChasmTree := historyi.NewMockChasmTree(s.controller)
+	mutableState.chasmTree = mockChasmTree
+	mockChasmTree.EXPECT().ArchetypeID().Return(archetypeID).AnyTimes()
+	// Like the real tree, it reports itself dirty until it closes.
+	treeClosed := false
+	mockChasmTree.EXPECT().IsStateDirty().DoAndReturn(func() bool { return !treeClosed }).AnyTimes()
+	mockChasmTree.EXPECT().IsDirty().Return(false).AnyTimes()
+	mockChasmTree.EXPECT().SpeculativeTransitionFailoverVersion().Return(int64(0), false).AnyTimes()
+	mockChasmTree.EXPECT().CloseTransaction(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(context.Context, bool) (chasm.NodesMutation, error) {
+			treeClosed = true
+			if onTreeClose != nil {
+				onTreeClose(mutableState)
+			}
+			return chasmMutation, nil
+		},
+	).Times(1)
+	return mutableState
+}
+
+func (s *mutableStateSuite) enableChasmSkipNoopTransaction(enabled bool) {
+	original := s.mockConfig.EnableCHASMSkipNoopTransaction
+	s.mockConfig.EnableCHASMSkipNoopTransaction = dynamicconfig.GetBoolPropertyFnFilteredByNamespace(enabled)
+	s.T().Cleanup(func() { s.mockConfig.EnableCHASMSkipNoopTransaction = original })
+}
+
+func (s *mutableStateSuite) TestCloseTransactionAsMutationSkipIfNoop_Skips() {
+	s.enableChasmSkipNoopTransaction(true)
+	mutableState := s.newChasmNoopMutableState(chasm.WorkflowArchetypeID+101, chasm.NodesMutation{}, nil)
+
+	stateTransitionCount := mutableState.executionInfo.StateTransitionCount
+	transitionHistory := common.CloneProto(&persistencespb.WorkflowExecutionInfo{
+		TransitionHistory: mutableState.executionInfo.TransitionHistory,
+	}).TransitionHistory
+	lastUpdateTime := common.CloneProto(mutableState.executionInfo.LastUpdateTime)
+	checksum := common.CloneProto(mutableState.checksum)
+	dbRecordVersion := mutableState.dbRecordVersion
+
+	mutation, eventsSeq, err := mutableState.CloseTransactionAsMutationSkipIfNoop(
+		context.Background(),
+		historyi.TransactionPolicyActive,
+	)
+	s.NoError(err)
+	s.Nil(mutation)
+	s.Empty(eventsSeq)
+
+	// The in-memory state must still match the DB.
+	s.False(mutableState.IsDirty())
+	s.Equal(stateTransitionCount, mutableState.executionInfo.StateTransitionCount)
+	s.Len(mutableState.executionInfo.TransitionHistory, len(transitionHistory))
+	for i := range transitionHistory {
+		protorequire.ProtoEqual(s.T(), transitionHistory[i], mutableState.executionInfo.TransitionHistory[i])
+	}
+	protorequire.ProtoEqual(s.T(), lastUpdateTime, mutableState.executionInfo.LastUpdateTime)
+	protorequire.ProtoEqual(s.T(), checksum, mutableState.checksum)
+	s.Equal(dbRecordVersion, mutableState.dbRecordVersion)
+}
+
+func (s *mutableStateSuite) TestCloseTransactionAsMutationSkipIfNoop_Persists() {
+	nonWorkflowArchetypeID := chasm.WorkflowArchetypeID + 101
+	nonEmptyChasmMutation := chasm.NodesMutation{
+		UpdatedNodes: map[string]*persistencespb.ChasmNode{"": {}},
+	}
+
+	testCases := []struct {
+		name          string
+		skipEnabled   bool
+		archetypeID   chasm.ArchetypeID
+		chasmMutation chasm.NodesMutation
+		policy        historyi.TransactionPolicy
+		withoutOptIn  bool // Closes with CloseTransactionAsMutation instead.
+		setup         func(*MutableStateImpl)
+		onTreeClose   func(*MutableStateImpl) // Runs inside the CHASM tree's CloseTransaction.
+		verify        func(*persistence.WorkflowMutation)
+	}{
+		{
+			name:         "without opt-in",
+			skipEnabled:  true,
+			withoutOptIn: true,
+		},
+		{
+			name:        "skipping disabled",
+			skipEnabled: false,
+		},
+		{
+			name:        "passive transaction",
+			skipEnabled: true,
+			policy:      historyi.TransactionPolicyPassive,
+		},
+		{
+			name:        "workflow",
+			skipEnabled: true,
+			archetypeID: chasm.WorkflowArchetypeID,
+		},
+		{
+			name:          "CHASM nodes updated",
+			skipEnabled:   true,
+			chasmMutation: nonEmptyChasmMutation,
+		},
+		{
+			name:        "CHASM nodes deleted",
+			skipEnabled: true,
+			chasmMutation: chasm.NodesMutation{
+				DeletedNodes: map[string]struct{}{"child": {}},
+			},
+		},
+		{
+			// Tasks without a state change are unexpected, so the transaction is persisted rather than dropping them.
+			name:        "tasks generated",
+			skipEnabled: true,
+			setup: func(ms *MutableStateImpl) {
+				ms.AddTasks(&tasks.ChasmTaskPure{
+					WorkflowKey:         ms.GetWorkflowKey(),
+					VisibilityTimestamp: time.Now(),
+				})
+			},
+			verify: func(mutation *persistence.WorkflowMutation) {
+				s.Len(mutation.Tasks[tasks.CategoryTimer], 1)
+			},
+		},
+		{
+			// The CHASM tree's CloseTransaction syncs the execution state with the root component's lifecycle.
+			name:        "execution closed by CHASM tree",
+			skipEnabled: true,
+			onTreeClose: func(ms *MutableStateImpl) {
+				s.False(ms.isStateDirty())
+				_, err := ms.UpdateWorkflowStateStatus(
+					enumsspb.WORKFLOW_EXECUTION_STATE_COMPLETED,
+					enumspb.WORKFLOW_EXECUTION_STATUS_COMPLETED,
+				)
+				s.NoError(err)
+			},
+			verify: func(mutation *persistence.WorkflowMutation) {
+				s.Equal(enumsspb.WORKFLOW_EXECUTION_STATE_COMPLETED, mutation.ExecutionState.State)
+			},
+		},
+		{
+			// The CHASM tree's CloseTransaction records time skipping, which changes no state or tasks when it only
+			// counts the skip.
+			name:        "time skipping recorded by CHASM tree",
+			skipEnabled: true,
+			setup: func(ms *MutableStateImpl) {
+				ms.executionInfo.TimeSkippingInfo = &persistencespb.TimeSkippingInfo{
+					Config: &commonpb.TimeSkippingConfig{Enabled: true, MaxSessionSkipCount: 10},
+				}
+			},
+			onTreeClose: func(ms *MutableStateImpl) {
+				s.False(ms.isStateDirty())
+				transition := chasm.NewTimeSkippingTransition(ms.Now())
+				transition.DisabledAfterFastForward = true
+				ms.RecordTimeSkippingTransition(transition)
+			},
+			verify: func(mutation *persistence.WorkflowMutation) {
+				s.Equal(int32(1), mutation.ExecutionInfo.GetTimeSkippingInfo().GetSessionSkipCount())
+				s.Empty(mutation.Tasks[tasks.CategoryTimer])
+			},
+		},
+		{
+			name:        "request ID attached",
+			skipEnabled: true,
+			setup: func(ms *MutableStateImpl) {
+				ms.AttachChasmRequestID("request-id")
+			},
+			verify: func(mutation *persistence.WorkflowMutation) {
+				s.Contains(mutation.ExecutionState.RequestIds, "request-id")
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		s.Run(tc.name, func() {
+			s.enableChasmSkipNoopTransaction(tc.skipEnabled)
+			archetypeID := tc.archetypeID
+			if archetypeID == chasm.UnspecifiedArchetypeID {
+				archetypeID = nonWorkflowArchetypeID
+			}
+
+			mutableState := s.newChasmNoopMutableState(archetypeID, tc.chasmMutation, tc.onTreeClose)
+			if tc.setup != nil {
+				tc.setup(mutableState)
+			}
+			stateTransitionCount := mutableState.executionInfo.StateTransitionCount
+
+			closeTransaction := mutableState.CloseTransactionAsMutationSkipIfNoop
+			if tc.withoutOptIn {
+				closeTransaction = mutableState.CloseTransactionAsMutation
+			}
+			mutation, _, err := closeTransaction(context.Background(), tc.policy)
+			s.NoError(err)
+			s.Require().NotNil(mutation)
+			s.Equal(stateTransitionCount+1, mutableState.executionInfo.StateTransitionCount)
+			if tc.verify != nil {
+				tc.verify(mutation)
+			}
+		})
+	}
 }
 
 func (s *mutableStateSuite) TestCloseTransactionGenerateCHASMRetentionTask_NonWorkflow_Active() {

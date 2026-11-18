@@ -21,6 +21,7 @@ import (
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/cluster"
 	"go.temporal.io/server/common/definition"
+	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/limiter"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/metrics"
@@ -41,7 +42,8 @@ type (
 		suite.Suite
 		*require.Assertions
 
-		mockShard *shard.ContextTest
+		mockShard  *shard.ContextTest
+		mockEngine *historyi.MockEngine
 
 		workflowContext *ContextImpl
 	}
@@ -63,6 +65,7 @@ func (s *contextSuite) SetupTest() {
 		configs,
 	)
 	mockEngine := historyi.NewMockEngine(controller)
+	s.mockEngine = mockEngine
 	mockEngine.EXPECT().NotifyNewTasks(gomock.Any()).AnyTimes()
 	mockEngine.EXPECT().NotifyNewHistoryEvent(gomock.Any()).AnyTimes()
 	s.mockShard.SetEngineForTesting(mockEngine)
@@ -944,4 +947,93 @@ func (s *contextSuite) TestLoadMutableState_SpeculativeChasmTransitionFailoverVe
 	_, err := s.workflowContext.LoadMutableState(context.Background(), s.mockShard)
 	s.ErrorIs(err, readErr)
 	s.Nil(s.workflowContext.MutableState)
+}
+
+// newChasmNoopMutableState sets the suite's context up with a non-workflow CHASM execution in an open transaction.
+// Its CHASM tree reports itself dirty until it closes, as it does after a component is accessed for mutation, but has
+// nothing to persist.
+func (s *contextSuite) newChasmNoopMutableState() {
+	s.mockShard.GetConfig().EnableCHASMSkipNoopTransaction = dynamicconfig.GetBoolPropertyFnFilteredByNamespace(true)
+	chasmArchetypeID := chasm.WorkflowArchetypeID + 101
+	dbState := &persistencespb.WorkflowMutableState{
+		ExecutionInfo: &persistencespb.WorkflowExecutionInfo{
+			NamespaceId: tests.NamespaceID.String(),
+			WorkflowId:  tests.WorkflowID,
+			VersionHistories: &historyspb.VersionHistories{
+				Histories: []*historyspb.VersionHistory{
+					{
+						BranchToken: []byte("token#1"),
+						Items: []*historyspb.VersionHistoryItem{
+							{EventId: 1, Version: common.EmptyVersion},
+						},
+					},
+				},
+			},
+			TransitionHistory: []*persistencespb.VersionedTransition{
+				{
+					NamespaceFailoverVersion: common.EmptyVersion,
+					TransitionCount:          1,
+				},
+			},
+			ExecutionStats: &persistencespb.ExecutionStats{
+				HistorySize: 128,
+			},
+		},
+		ExecutionState: &persistencespb.WorkflowExecutionState{
+			RunId:     tests.RunID,
+			State:     enumsspb.WORKFLOW_EXECUTION_STATE_RUNNING,
+			Status:    enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING,
+			StartTime: timestamppb.New(time.Now()),
+		},
+		NextEventId: 2,
+	}
+
+	mutableState, err := NewMutableStateFromDB(
+		s.mockShard,
+		s.mockShard.MockEventsCache,
+		s.mockShard.GetLogger(),
+		tests.LocalNamespaceEntry,
+		dbState,
+		1,
+	)
+	s.NoError(err)
+	_, err = mutableState.StartTransaction(tests.LocalNamespaceEntry)
+	s.NoError(err)
+
+	mockChasmTree := historyi.NewMockChasmTree(gomock.NewController(s.T()))
+	mutableState.chasmTree = mockChasmTree
+	mockChasmTree.EXPECT().ArchetypeID().Return(chasmArchetypeID).AnyTimes()
+	treeClosed := false
+	mockChasmTree.EXPECT().IsStateDirty().DoAndReturn(func() bool { return !treeClosed }).AnyTimes()
+	mockChasmTree.EXPECT().IsDirty().Return(false).AnyTimes()
+	mockChasmTree.EXPECT().SpeculativeTransitionFailoverVersion().Return(int64(0), false).AnyTimes()
+	mockChasmTree.EXPECT().CloseTransaction(gomock.Any(), true).DoAndReturn(
+		func(context.Context, bool) (chasm.NodesMutation, error) {
+			treeClosed = true
+			return chasm.NodesMutation{}, nil
+		},
+	).Times(1)
+
+	s.workflowContext.archetypeID = chasmArchetypeID
+	s.workflowContext.MutableState = mutableState
+}
+
+func (s *contextSuite) TestUpdateWorkflowExecutionAsActiveSkipIfNoop_Skips() {
+	s.newChasmNoopMutableState()
+	stateTransitionCount := s.workflowContext.MutableState.GetExecutionInfo().StateTransitionCount
+
+	// The strict ExecutionMgr mock fails the test if the update is persisted.
+	s.NoError(s.workflowContext.UpdateWorkflowExecutionAsActiveSkipIfNoop(context.Background(), s.mockShard))
+	s.False(s.workflowContext.IsDirty())
+	s.Equal(stateTransitionCount, s.workflowContext.MutableState.GetExecutionInfo().StateTransitionCount)
+}
+
+func (s *contextSuite) TestUpdateWorkflowExecutionAsActive_NoopIsPersisted() {
+	s.newChasmNoopMutableState()
+	s.mockEngine.EXPECT().NotifyChasmExecution(gomock.Any(), gomock.Any()).AnyTimes()
+	s.mockShard.Resource.ExecutionMgr.EXPECT().UpdateWorkflowExecution(gomock.Any(), gomock.Any()).
+		Return(tests.UpdateWorkflowExecutionResponse, nil).
+		Times(1)
+
+	s.NoError(s.workflowContext.UpdateWorkflowExecutionAsActive(context.Background(), s.mockShard))
 }

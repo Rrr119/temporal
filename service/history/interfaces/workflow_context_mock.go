@@ -360,6 +360,20 @@ func (mr *MockWorkflowContextMockRecorder) UpdateWorkflowExecutionAsActive(ctx, 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateWorkflowExecutionAsActive", reflect.TypeOf((*MockWorkflowContext)(nil).UpdateWorkflowExecutionAsActive), ctx, shardContext)
 }
 
+// UpdateWorkflowExecutionAsActiveSkipIfNoop mocks base method.
+func (m *MockWorkflowContext) UpdateWorkflowExecutionAsActiveSkipIfNoop(ctx context.Context, shardContext ShardContext) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateWorkflowExecutionAsActiveSkipIfNoop", ctx, shardContext)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateWorkflowExecutionAsActiveSkipIfNoop indicates an expected call of UpdateWorkflowExecutionAsActiveSkipIfNoop.
+func (mr *MockWorkflowContextMockRecorder) UpdateWorkflowExecutionAsActiveSkipIfNoop(ctx, shardContext any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateWorkflowExecutionAsActiveSkipIfNoop", reflect.TypeOf((*MockWorkflowContext)(nil).UpdateWorkflowExecutionAsActiveSkipIfNoop), ctx, shardContext)
+}
+
 // UpdateWorkflowExecutionAsPassive mocks base method.
 func (m *MockWorkflowContext) UpdateWorkflowExecutionAsPassive(ctx context.Context, shardContext ShardContext) error {
 	m.ctrl.T.Helper()

@@ -1879,6 +1879,22 @@ func (mr *MockMutableStateMockRecorder) CloseTransactionAsMutation(ctx, transact
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloseTransactionAsMutation", reflect.TypeOf((*MockMutableState)(nil).CloseTransactionAsMutation), ctx, transactionPolicy)
 }
 
+// CloseTransactionAsMutationSkipIfNoop mocks base method.
+func (m *MockMutableState) CloseTransactionAsMutationSkipIfNoop(ctx context.Context, transactionPolicy TransactionPolicy) (*persistence0.WorkflowMutation, []*persistence0.WorkflowEvents, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CloseTransactionAsMutationSkipIfNoop", ctx, transactionPolicy)
+	ret0, _ := ret[0].(*persistence0.WorkflowMutation)
+	ret1, _ := ret[1].([]*persistence0.WorkflowEvents)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// CloseTransactionAsMutationSkipIfNoop indicates an expected call of CloseTransactionAsMutationSkipIfNoop.
+func (mr *MockMutableStateMockRecorder) CloseTransactionAsMutationSkipIfNoop(ctx, transactionPolicy any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloseTransactionAsMutationSkipIfNoop", reflect.TypeOf((*MockMutableState)(nil).CloseTransactionAsMutationSkipIfNoop), ctx, transactionPolicy)
+}
+
 // CloseTransactionAsSnapshot mocks base method.
 func (m *MockMutableState) CloseTransactionAsSnapshot(ctx context.Context, transactionPolicy TransactionPolicy) (*persistence0.WorkflowSnapshot, []*persistence0.WorkflowEvents, error) {
 	m.ctrl.T.Helper()

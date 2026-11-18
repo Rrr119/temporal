@@ -759,6 +759,21 @@ func (c *ContextImpl) UpdateWorkflowExecutionAsActive(
 	ctx context.Context,
 	shardContext historyi.ShardContext,
 ) error {
+	return c.updateWorkflowExecutionAsActive(ctx, shardContext, false)
+}
+
+func (c *ContextImpl) UpdateWorkflowExecutionAsActiveSkipIfNoop(
+	ctx context.Context,
+	shardContext historyi.ShardContext,
+) error {
+	return c.updateWorkflowExecutionAsActive(ctx, shardContext, true)
+}
+
+func (c *ContextImpl) updateWorkflowExecutionAsActive(
+	ctx context.Context,
+	shardContext historyi.ShardContext,
+	skipIfNoop bool,
+) error {
 
 	// We only perform this check on active cluster for the namespace
 	historySizeForceTerminate, err := c.enforceHistorySizeCheck(ctx, shardContext)
@@ -785,7 +800,7 @@ func (c *ContextImpl) UpdateWorkflowExecutionAsActive(
 		return err
 	}
 
-	err = c.UpdateWorkflowExecutionWithNew(
+	err = c.updateWorkflowExecutionWithNewOrSkip(
 		ctx,
 		shardContext,
 		updateMode,
@@ -793,6 +808,7 @@ func (c *ContextImpl) UpdateWorkflowExecutionAsActive(
 		nil,
 		historyi.TransactionPolicyActive,
 		nil,
+		skipIfNoop,
 	)
 	if err != nil {
 		return err
@@ -880,11 +896,36 @@ func (c *ContextImpl) UpdateWorkflowExecutionWithNew(
 	updateWorkflowTransactionPolicy historyi.TransactionPolicy,
 	newWorkflowTransactionPolicy *historyi.TransactionPolicy,
 ) error {
+	return c.updateWorkflowExecutionWithNewOrSkip(
+		ctx,
+		shardContext,
+		updateMode,
+		newContext,
+		newMutableState,
+		updateWorkflowTransactionPolicy,
+		newWorkflowTransactionPolicy,
+		false,
+	)
+}
+
+// updateWorkflowExecutionWithNewOrSkip is UpdateWorkflowExecutionWithNew, except that it skips the write when
+// skipIfNoop is set and the transaction has nothing to persist.
+func (c *ContextImpl) updateWorkflowExecutionWithNewOrSkip(
+	ctx context.Context,
+	shardContext historyi.ShardContext,
+	updateMode persistence.UpdateWorkflowMode,
+	newContext historyi.WorkflowContext,
+	newMutableState historyi.MutableState,
+	updateWorkflowTransactionPolicy historyi.TransactionPolicy,
+	newWorkflowTransactionPolicy *historyi.TransactionPolicy,
+	skipIfNoop bool,
+) error {
 	if hook, ok := testhooks.Get(
 		c.testHooks,
 		testhooks.HistoryPassiveReplicationTest,
 		namespace.ID(c.workflowKey.NamespaceID),
 	); ok {
+		// The hook replicates the mutation of every update, so the write is never skipped here.
 		metrics.HistoryPassiveReplicationTestHookCounter.With(c.metricsHandler).Record(
 			1,
 			metrics.OperationTag("WorkflowContext"),
@@ -912,6 +953,7 @@ func (c *ContextImpl) UpdateWorkflowExecutionWithNew(
 					newMutableState,
 					updateWorkflowTransactionPolicy,
 					newWorkflowTransactionPolicy,
+					false,
 				)
 			},
 			ExecuteExecutionTransaction: func(payload *ExecutionTransactionPayload) error {
@@ -934,6 +976,7 @@ func (c *ContextImpl) UpdateWorkflowExecutionWithNew(
 				newMutableState,
 				updateWorkflowTransactionPolicy,
 				newWorkflowTransactionPolicy,
+				false,
 			)
 		})
 	}
@@ -946,6 +989,7 @@ func (c *ContextImpl) UpdateWorkflowExecutionWithNew(
 		newMutableState,
 		updateWorkflowTransactionPolicy,
 		newWorkflowTransactionPolicy,
+		skipIfNoop,
 	)
 }
 
@@ -957,6 +1001,7 @@ func (c *ContextImpl) updateWorkflowExecutionWithNew(
 	newMutableState historyi.MutableState,
 	updateWorkflowTransactionPolicy historyi.TransactionPolicy,
 	newWorkflowTransactionPolicy *historyi.TransactionPolicy,
+	skipIfNoop bool,
 ) (retError error) {
 
 	defer func() {
@@ -987,9 +1032,14 @@ func (c *ContextImpl) updateWorkflowExecutionWithNew(
 		newMutableState,
 		updateWorkflowTransactionPolicy,
 		newWorkflowTransactionPolicy,
+		skipIfNoop,
 	)
 	if err != nil {
 		return err
+	}
+	if payload.ExecutionMutation == nil {
+		// The transaction had nothing to persist.
+		return nil
 	}
 	return c.executeWorkflowTransaction(
 		ctx,
@@ -1041,8 +1091,14 @@ func (c *ContextImpl) closeMutableStateTransaction(
 	newMutableState historyi.MutableState,
 	updateWorkflowTransactionPolicy historyi.TransactionPolicy,
 	newWorkflowTransactionPolicy *historyi.TransactionPolicy,
+	skipIfNoop bool,
 ) (*ExecutionTransactionPayload, error) {
-	updateWorkflow, updateWorkflowEventsSeq, err := c.MutableState.CloseTransactionAsMutation(
+	closeTransaction := c.MutableState.CloseTransactionAsMutation
+	// A new run is always persisted together with the current run's mutation, so the mutation can't be skipped.
+	if skipIfNoop && newMutableState == nil {
+		closeTransaction = c.MutableState.CloseTransactionAsMutationSkipIfNoop
+	}
+	updateWorkflow, updateWorkflowEventsSeq, err := closeTransaction(
 		ctx,
 		updateWorkflowTransactionPolicy,
 	)

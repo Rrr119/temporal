@@ -1589,6 +1589,45 @@ func (s *chasmEngineSuite) readActivityInfo(ref chasm.ComponentRef) *persistence
 	return info
 }
 
+func (s *chasmEngineSuite) TestUpdateComponent_NoopSkipsPersistence() {
+	s.config.EnableCHASMSkipPersistence = dynamicconfig.GetBoolPropertyFnFilteredByNamespace(true)
+	s.config.EnableCHASMSkipNoopTransaction = dynamicconfig.GetBoolPropertyFnFilteredByNamespace(true)
+	ref := s.loadRunningTestExecution(1)
+	notified, unsubscribe := s.engine.notifier.Subscribe(ref.ExecutionKey)
+	defer unsubscribe()
+
+	// No UpdateWorkflowExecution or NotifyChasmExecution is expected for an update that changes nothing, so either
+	// call fails the test.
+	_, err := s.engine.UpdateComponent(context.Background(), ref,
+		func(chasm.MutableContext, chasm.Component) error { return nil })
+	s.NoError(err)
+	select {
+	case <-notified:
+		s.Fail("skipped update notified pollers")
+	default:
+	}
+
+	// A later update that changes the component is persisted.
+	persisted := &persistencespb.ActivityInfo{}
+	s.expectPersistedActivityInfo(ref, persisted)
+	_, err = s.engine.UpdateComponent(context.Background(), ref,
+		s.setActivityField(func(info *persistencespb.ActivityInfo) { info.ActivityId = "a" }))
+	s.NoError(err)
+	s.Equal("a", persisted.ActivityId)
+}
+
+func (s *chasmEngineSuite) TestUpdateComponent_NoopPersistedWhenSkipDisabled() {
+	s.config.EnableCHASMSkipPersistence = dynamicconfig.GetBoolPropertyFnFilteredByNamespace(true)
+	ref := s.loadRunningTestExecution(1)
+	s.mockExecutionManager.EXPECT().UpdateWorkflowExecution(gomock.Any(), gomock.Any()).
+		Return(tests.UpdateWorkflowExecutionResponse, nil).
+		Times(1)
+
+	_, err := s.engine.UpdateComponent(context.Background(), ref,
+		func(chasm.MutableContext, chasm.Component) error { return nil })
+	s.NoError(err)
+}
+
 func (s *chasmEngineSuite) TestUpdateComponent_Speculative_NoPersistence() {
 	// No UpdateWorkflowExecution or NotifyChasmExecution is expected, so either call fails the test.
 	ref := s.loadRunningTestExecution(1)

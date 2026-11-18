@@ -536,7 +536,10 @@ func (e *ChasmEngine) applyUpdateWithLease(
 	}
 
 	if decision.PersistNow {
-		if err := executionLease.GetContext().UpdateWorkflowExecutionAsActive(ctx, shardContext); err != nil {
+		// The update only changes the CHASM tree, so the write can be skipped when the tree has nothing to persist,
+		// e.g. when only ephemeral components changed. Pollers aren't notified then, just as for a persisted write
+		// without CHASM node changes: no persisted state changed, so no poll predicate can change.
+		if err := executionLease.GetContext().UpdateWorkflowExecutionAsActiveSkipIfNoop(ctx, shardContext); err != nil {
 			return nil, err
 		}
 	} else {

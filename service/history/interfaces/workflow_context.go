@@ -85,6 +85,12 @@ type (
 			ctx context.Context,
 			shardContext ShardContext,
 		) error
+		// UpdateWorkflowExecutionAsActiveSkipIfNoop is UpdateWorkflowExecutionAsActive, except that it skips the write
+		// when the transaction has nothing to persist. Only the CHASM engine uses it.
+		UpdateWorkflowExecutionAsActiveSkipIfNoop(
+			ctx context.Context,
+			shardContext ShardContext,
+		) error
 		UpdateWorkflowExecutionWithNewAsActive(
 			ctx context.Context,
 			shardContext ShardContext,
