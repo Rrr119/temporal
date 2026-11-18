@@ -29,6 +29,10 @@ import (
 )
 
 func TaskSessionDirective(singleSessionBound bool, taskQueue *taskqueuepb.TaskQueue) *taskqueuespb.TaskSessionDirective {
+	// TODO (Shivam): Workflows with a non-exclusive binding send no directive, so Matching treats their tasks as plain sticky
+	// tasks. They should send {WorkerQueue, IsExclusiveWorkerAssigned: false} once every Matching consumer of the directive
+	// is audited for the non-exclusive case: any directive makes Matching load an unloaded sticky partition, and task-add
+	// hooks receive it.
 	if !singleSessionBound || taskQueue.GetKind() != enumspb.TASK_QUEUE_KIND_STICKY || taskQueue.GetName() == "" {
 		return nil
 	}

@@ -1924,11 +1924,11 @@ func (s *timerQueueStandbyTaskExecutorSuite) TestProcessActivityRetryTimer_Pendi
 	s.processPendingActivityRetryTimer(true, false)
 }
 
-func (s *timerQueueStandbyTaskExecutorSuite) TestProcessActivityRetryTimer_PendingWorkflowSessionWithoutPlacement() {
+func (s *timerQueueStandbyTaskExecutorSuite) TestProcessActivityRetryTimer_PendingWorkflowSessionAfterUnbind() {
 	s.processPendingActivityRetryTimer(true, true)
 }
 
-func (s *timerQueueStandbyTaskExecutorSuite) processPendingActivityRetryTimer(useSession, missingPlacement bool) {
+func (s *timerQueueStandbyTaskExecutorSuite) processPendingActivityRetryTimer(useSession, sessionDropped bool) {
 	s.T().Helper()
 	execution := &commonpb.WorkflowExecution{
 		WorkflowId: "some random workflow ID",
@@ -1967,10 +1967,13 @@ func (s *timerQueueStandbyTaskExecutorSuite) processPendingActivityRetryTimer(us
 	expectedTaskQueue := &taskqueuepb.TaskQueue{Name: taskQueueName, Kind: enumspb.TASK_QUEUE_KIND_NORMAL}
 	if useSession {
 		activityInfo.SessionState = &persistencespb.ActivitySessionState{Placement: &persistencespb.ActivitySessionState_WorkflowSession{WorkflowSession: &emptypb.Empty{}}}
-		if !missingPlacement {
+		if sessionDropped {
+			mutableState.GetExecutionInfo().SessionState = &persistencespb.SessionState{}
+		} else {
+			mutableState.GetExecutionInfo().SessionState = &persistencespb.SessionState{WorkerQueue: "sticky-worker"}
 			mutableState.SetStickyTaskQueue("sticky-worker", durationpb.New(time.Second))
+			expectedTaskQueue = &taskqueuepb.TaskQueue{Name: "sticky-worker", Kind: enumspb.TASK_QUEUE_KIND_STICKY, NormalName: taskQueueName}
 		}
-		expectedTaskQueue = &taskqueuepb.TaskQueue{Name: "sticky-worker", Kind: enumspb.TASK_QUEUE_KIND_STICKY, NormalName: taskQueueName}
 	}
 
 	timerSequence := workflow.NewTimerSequence(mutableState)
@@ -2002,10 +2005,6 @@ func (s *timerQueueStandbyTaskExecutorSuite) processPendingActivityRetryTimer(us
 	// no-op post action
 	s.mockShard.SetCurrentTime(s.clusterName, s.now)
 	resp := s.timerQueueStandbyTaskExecutor.Execute(context.Background(), s.newTaskExecutable(timerTask))
-	if missingPlacement {
-		s.ErrorIs(resp.ExecutionErr, consts.ErrDependencyTaskNotCompleted)
-		return
-	}
 	s.Equal(consts.ErrTaskRetry, resp.ExecutionErr)
 
 	// resend history post action
