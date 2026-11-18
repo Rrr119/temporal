@@ -7601,9 +7601,9 @@ func TestQueryWorkflowAssignedStickyReadFailure(t *testing.T) {
 	require.Empty(t, engine.partitions)
 }
 
-// TestGeneralSessionWorkflowAdmission verifies heartbeat lookup is an additive admission path for a busy general-session worker.
+// TestMultiSessionWorkflowAdmission verifies heartbeat lookup is an additive admission path for a busy multi-session worker.
 // Ordinary and exclusive destinations retain their existing rules, and lookup failures must not become worker-death signals.
-func (s *matchingEngineSuite) TestGeneralSessionWorkflowAdmission() {
+func (s *matchingEngineSuite) TestMultiSessionWorkflowAdmission() {
 	for _, tc := range []struct {
 		name        string
 		mode        string
@@ -7615,18 +7615,18 @@ func (s *matchingEngineSuite) TestGeneralSessionWorkflowAdmission() {
 		lookupErr   error
 		admitted    bool
 	}{
-		{name: "live worker without poll history", mode: "general", lookup: true, admitted: true},
-		{name: "missing worker", mode: "general", lookup: true, lookupErr: serviceerror.NewNotFound("worker missing")},
-		{name: "namespace has no worker observations", mode: "general", lookup: true, lookupErr: serviceerror.NewNamespaceNotFound("empty registry")},
-		{name: "registry RPC failure", mode: "general", lookup: true, lookupErr: serviceerror.NewUnavailable("registry unavailable")},
+		{name: "live worker without poll history", mode: "multi-session", lookup: true, admitted: true},
+		{name: "missing worker", mode: "multi-session", lookup: true, lookupErr: serviceerror.NewNotFound("worker missing")},
+		{name: "namespace has no worker observations", mode: "multi-session", lookup: true, lookupErr: serviceerror.NewNamespaceNotFound("empty registry")},
+		{name: "registry RPC failure", mode: "multi-session", lookup: true, lookupErr: serviceerror.NewUnavailable("registry unavailable")},
 		{name: "ordinary sticky worker", mode: "ordinary"},
-		{name: "general worker without instance key", mode: "general", missingKey: true},
+		{name: "multi-session worker without instance key", mode: "multi-session", missingKey: true},
 		{name: "exclusive worker without heartbeat", mode: "exclusive", withContext: true, admitted: true},
 		{name: "exclusive worker missing directive", mode: "exclusive"},
-		{name: "recent general poller", mode: "general", recent: true, admitted: true},
-		{name: "general directive live worker", mode: "general", withContext: true, lookup: true, admitted: true},
-		{name: "general directive missing worker", mode: "general", withContext: true, lookup: true, lookupErr: serviceerror.NewNotFound("worker missing")},
-		{name: "general directive unloaded partition", mode: "general", withContext: true, unloaded: true},
+		{name: "recent multi-session poller", mode: "multi-session", recent: true, admitted: true},
+		{name: "multi-session directive live worker", mode: "multi-session", withContext: true, lookup: true, admitted: true},
+		{name: "multi-session directive missing worker", mode: "multi-session", withContext: true, lookup: true, lookupErr: serviceerror.NewNotFound("worker missing")},
+		{name: "multi-session directive unloaded partition", mode: "multi-session", withContext: true, unloaded: true},
 	} {
 		s.Run(tc.name, func() {
 			t := s.T()
@@ -7639,8 +7639,8 @@ func (s *matchingEngineSuite) TestGeneralSessionWorkflowAdmission() {
 			queue := pm.(*taskQueuePartitionManagerImpl).defaultQueue().(*physicalTaskQueueManagerImpl)
 			metadata := &pollMetadata{workerInstanceKey: tv.WorkerInstanceKey(), conditions: &matchingservice.PollConditions{NoWait: true}}
 			switch tc.mode {
-			case "general":
-				metadata.sessionOptions = &sessionpb.WorkerSessionOptions{}
+			case "multi-session":
+				metadata.sessionOptions = multiSessionOptions(tv.StickyTaskQueue().GetName())
 			case "exclusive":
 				require.NoError(t, queue.AssignExclusiveWorker())
 				metadata.sessionOptions = &sessionpb.WorkerSessionOptions{Admission: &sessionpb.WorkerSessionOptions_SingleSession{

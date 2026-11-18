@@ -824,9 +824,9 @@ func (e *matchingEngineImpl) AddWorkflowTask(
 		return "", false, err
 	}
 	if sticky && !exclusiveSession && !stickyWorkerAvailable(pm) {
-		// For general session workflow tasks, if there are no sticky polls in memory, conduct a check to
+		// For multi-session workers, if there are no sticky polls in memory, conduct a check to
 		// see if there is an occurrence of the worker in the in-memory heartbeat cache
-		available, err := e.generalSessionWorkerAvailable(ctx, pm)
+		available, err := e.multiSessionWorkerAvailable(ctx, pm)
 		if err != nil {
 			return "", false, err
 		}
@@ -4013,11 +4013,11 @@ func stickyWorkerAvailable(pm taskQueuePartitionManager) bool {
 	return pm != nil && pm.HasPollerAfter("", time.Now().Add(-stickyPollerUnavailableWindow))
 }
 
-func (e *matchingEngineImpl) generalSessionWorkerAvailable(ctx context.Context, pm taskQueuePartitionManager) (bool, error) {
+func (e *matchingEngineImpl) multiSessionWorkerAvailable(ctx context.Context, pm taskQueuePartitionManager) (bool, error) {
 	if pm == nil {
 		return false, nil
 	}
-	workerInstanceKey := pm.GeneralSessionWorkerInstanceKey()
+	workerInstanceKey := pm.MultiSessionWorkerInstanceKey()
 	if workerInstanceKey == "" {
 		return false, nil
 	}

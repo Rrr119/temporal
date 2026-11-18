@@ -120,18 +120,18 @@ func (mr *MocktaskQueuePartitionManagerMockRecorder) DispatchQueryTask(ctx, task
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DispatchQueryTask", reflect.TypeOf((*MocktaskQueuePartitionManager)(nil).DispatchQueryTask), ctx, taskId, request)
 }
 
-// GeneralSessionWorkerInstanceKey mocks base method.
-func (m *MocktaskQueuePartitionManager) GeneralSessionWorkerInstanceKey() string {
+// MultiSessionWorkerInstanceKey mocks base method.
+func (m *MocktaskQueuePartitionManager) MultiSessionWorkerInstanceKey() string {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GeneralSessionWorkerInstanceKey")
+	ret := m.ctrl.Call(m, "MultiSessionWorkerInstanceKey")
 	ret0, _ := ret[0].(string)
 	return ret0
 }
 
-// GeneralSessionWorkerInstanceKey indicates an expected call of GeneralSessionWorkerInstanceKey.
-func (mr *MocktaskQueuePartitionManagerMockRecorder) GeneralSessionWorkerInstanceKey() *gomock.Call {
+// MultiSessionWorkerInstanceKey indicates an expected call of MultiSessionWorkerInstanceKey.
+func (mr *MocktaskQueuePartitionManagerMockRecorder) MultiSessionWorkerInstanceKey() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GeneralSessionWorkerInstanceKey", reflect.TypeOf((*MocktaskQueuePartitionManager)(nil).GeneralSessionWorkerInstanceKey))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MultiSessionWorkerInstanceKey", reflect.TypeOf((*MocktaskQueuePartitionManager)(nil).MultiSessionWorkerInstanceKey))
 }
 
 // GetAllPollerInfo mocks base method.

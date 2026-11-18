@@ -1366,10 +1366,10 @@ func TestTaskQueueVersionLimitReachedMetricIsEmitted(t *testing.T) {
 	}
 }
 
-// TestGeneralSessionWorkerAssociation initializes the per-worker queue's key only from a valid general-session poll.
+// TestMultiSessionWorkerAssociation initializes the per-worker queue's key only from a valid multi-session poll.
 // Poll-history removal and later polls must retain the first key for the queue manager's lifetime.
-func (s *PhysicalTaskQueueManagerTestSuite) TestGeneralSessionWorkerAssociation() {
-	for _, mode := range []string{"general", "ordinary", "exclusive", "missing worker key", "different worker key"} {
+func (s *PhysicalTaskQueueManagerTestSuite) TestMultiSessionWorkerAssociation() {
+	for _, mode := range []string{"multi-session", "ordinary", "empty session options", "exclusive", "missing worker key", "different worker key"} {
 		s.Run(mode, func() {
 			t := s.T()
 			tv := testvars.New(t)
@@ -1382,13 +1382,15 @@ func (s *PhysicalTaskQueueManagerTestSuite) TestGeneralSessionWorkerAssociation(
 			_, err := queue.backlogMgr.getDB().RenewLease(t.Context())
 			require.NoError(t, err)
 			metadata := &pollMetadata{
-				sessionOptions:    &sessionpb.WorkerSessionOptions{},
+				sessionOptions:    multiSessionOptions(tv.StickyTaskQueue().GetName()),
 				workerInstanceKey: tv.WorkerInstanceKey(),
 				conditions:        &matchingservice.PollConditions{NoWait: true},
 			}
 			switch mode {
 			case "ordinary":
 				metadata.sessionOptions = nil
+			case "empty session options":
+				metadata.sessionOptions = &sessionpb.WorkerSessionOptions{}
 			case "exclusive":
 				require.NoError(t, queue.AssignExclusiveWorker())
 				metadata.sessionOptions = &sessionpb.WorkerSessionOptions{Admission: &sessionpb.WorkerSessionOptions_SingleSession{
@@ -1397,34 +1399,34 @@ func (s *PhysicalTaskQueueManagerTestSuite) TestGeneralSessionWorkerAssociation(
 			case "missing worker key":
 				metadata.workerInstanceKey = ""
 			default:
-				require.Contains(t, []string{"general", "different worker key"}, mode)
+				require.Contains(t, []string{"multi-session", "different worker key"}, mode)
 			}
-			require.Empty(t, queue.GeneralSessionWorkerInstanceKey())
+			require.Empty(t, queue.MultiSessionWorkerInstanceKey())
 			_, err = queue.PollTask(t.Context(), metadata)
 			require.ErrorIs(t, err, errNoTasks)
-			if mode == "general" || mode == "different worker key" {
-				require.Equal(t, tv.WorkerInstanceKey(), queue.GeneralSessionWorkerInstanceKey())
+			if mode == "multi-session" || mode == "different worker key" {
+				require.Equal(t, tv.WorkerInstanceKey(), queue.MultiSessionWorkerInstanceKey())
 			} else {
-				require.Empty(t, queue.GeneralSessionWorkerInstanceKey())
+				require.Empty(t, queue.MultiSessionWorkerInstanceKey())
 			}
 
-			generalMetadata := *metadata
-			generalMetadata.sessionOptions = &sessionpb.WorkerSessionOptions{}
-			generalMetadata.workerInstanceKey = tv.WorkerInstanceKey()
-			_, err = queue.PollTask(t.Context(), &generalMetadata)
+			multiSessionMetadata := *metadata
+			multiSessionMetadata.sessionOptions = multiSessionOptions(tv.StickyTaskQueue().GetName())
+			multiSessionMetadata.workerInstanceKey = tv.WorkerInstanceKey()
+			_, err = queue.PollTask(t.Context(), &multiSessionMetadata)
 			require.ErrorIs(t, err, errNoTasks)
-			require.Equal(t, tv.WorkerInstanceKey(), queue.GeneralSessionWorkerInstanceKey())
-			queue.UpdatePollerInfo(pollerIdentity(tv.WorkerIdentity()), &generalMetadata)
+			require.Equal(t, tv.WorkerInstanceKey(), queue.MultiSessionWorkerInstanceKey())
+			queue.UpdatePollerInfo(pollerIdentity(tv.WorkerIdentity()), &multiSessionMetadata)
 			queue.RemovePoller(pollerIdentity(tv.WorkerIdentity()))
 			require.Empty(t, queue.GetAllPollerInfo())
-			require.Equal(t, tv.WorkerInstanceKey(), queue.GeneralSessionWorkerInstanceKey())
+			require.Equal(t, tv.WorkerInstanceKey(), queue.MultiSessionWorkerInstanceKey())
 
 			if mode == "different worker key" {
 				metadata.workerInstanceKey = "other-worker"
 			}
 			_, err = queue.PollTask(t.Context(), metadata)
 			require.ErrorIs(t, err, errNoTasks)
-			require.Equal(t, tv.WorkerInstanceKey(), queue.GeneralSessionWorkerInstanceKey())
+			require.Equal(t, tv.WorkerInstanceKey(), queue.MultiSessionWorkerInstanceKey())
 		})
 	}
 }
@@ -1518,9 +1520,9 @@ func userDataWithDeploymentVersion(deploymentName, buildID string) *persistences
 	}
 }
 
-// TestGeneralSessionWorkerAssociationConcurrentPolls checks publication to concurrent readers and pollers from one worker.
+// TestMultiSessionWorkerAssociationConcurrentPolls checks publication to concurrent readers and pollers from one worker.
 // Completing those polls must retain the worker association.
-func (s *PhysicalTaskQueueManagerTestSuite) TestGeneralSessionWorkerAssociationConcurrentPolls() {
+func (s *PhysicalTaskQueueManagerTestSuite) TestMultiSessionWorkerAssociationConcurrentPolls() {
 	t := s.T()
 	tv := testvars.New(t)
 	workerInstanceKey := tv.WorkerInstanceKey()
@@ -1543,18 +1545,24 @@ func (s *PhysicalTaskQueueManagerTestSuite) TestGeneralSessionWorkerAssociationC
 				return
 			}
 			_, err := queue.PollTask(ctx, &pollMetadata{
-				sessionOptions: &sessionpb.WorkerSessionOptions{}, workerInstanceKey: workerInstanceKey,
+				sessionOptions: multiSessionOptions(tv.StickyTaskQueue().GetName()), workerInstanceKey: workerInstanceKey,
 			})
 			done <- err
 		}()
 	}
 	close(start)
 	await.RequireTrue(t, func() bool {
-		return queue.currentPolls.Load() == pollers && queue.GeneralSessionWorkerInstanceKey() == workerInstanceKey
+		return queue.currentPolls.Load() == pollers && queue.MultiSessionWorkerInstanceKey() == workerInstanceKey
 	}, time.Second, time.Millisecond)
 	cancel()
 	for range pollers {
 		require.Error(t, await.Rcv(t, done))
 	}
-	require.Equal(t, workerInstanceKey, queue.GeneralSessionWorkerInstanceKey())
+	require.Equal(t, workerInstanceKey, queue.MultiSessionWorkerInstanceKey())
+}
+
+func multiSessionOptions(workerAddress string) *sessionpb.WorkerSessionOptions {
+	return &sessionpb.WorkerSessionOptions{Admission: &sessionpb.WorkerSessionOptions_MultiSession{
+		MultiSession: &sessionpb.MultiSessionOptions{WorkerAddress: workerAddress},
+	}}
 }

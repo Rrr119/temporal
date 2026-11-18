@@ -92,8 +92,8 @@ type (
 		deploymentVersionMonitorRunning atomic.Bool
 
 		// A sticky queue belongs to one worker process; retain its key beyond poll-history expiry.
-		generalSessionWorkerInstanceKey atomic.Pointer[string]
-		pollerScalingRateLimiter        quotas.RateLimiter
+		multiSessionWorkerInstanceKey atomic.Pointer[string]
+		pollerScalingRateLimiter      quotas.RateLimiter
 
 		taskTrackerLock sync.Mutex
 		tasksAdded      map[priorityKey]*taskTracker
@@ -439,7 +439,7 @@ func (c *physicalTaskQueueManagerImpl) PollTask(
 		}
 	}
 
-	c.recordGeneralSessionWorker(pollMetadata)
+	c.recordMultiSessionWorker(pollMetadata)
 
 	//nolint:forbidigo // physical task queue lifecycle is namespace-scoped
 	if !namespaceEntry.ActiveInCluster(c.clusterMeta.GetCurrentClusterName()) {
@@ -552,22 +552,22 @@ func (c *physicalTaskQueueManagerImpl) GetAllPollerInfo() []*taskqueuepb.PollerI
 	return res
 }
 
-func (c *physicalTaskQueueManagerImpl) recordGeneralSessionWorker(pollMetadata *pollMetadata) {
+func (c *physicalTaskQueueManagerImpl) recordMultiSessionWorker(pollMetadata *pollMetadata) {
 	if c.queue.Partition().Kind() != enumspb.TASK_QUEUE_KIND_STICKY || c.queue.TaskType() != enumspb.TASK_QUEUE_TYPE_WORKFLOW {
 		return
 	}
-	if c.generalSessionWorkerInstanceKey.Load() != nil {
+	if c.multiSessionWorkerInstanceKey.Load() != nil {
 		return
 	}
-	if pollMetadata.sessionOptions == nil || pollMetadata.sessionOptions.GetSingleSession() != nil || pollMetadata.workerInstanceKey == "" {
+	if pollMetadata.sessionOptions.GetMultiSession() == nil || pollMetadata.workerInstanceKey == "" {
 		return
 	}
 	workerInstanceKey := pollMetadata.workerInstanceKey
-	c.generalSessionWorkerInstanceKey.Store(&workerInstanceKey)
+	c.multiSessionWorkerInstanceKey.Store(&workerInstanceKey)
 }
 
-func (c *physicalTaskQueueManagerImpl) GeneralSessionWorkerInstanceKey() string {
-	if workerInstanceKey := c.generalSessionWorkerInstanceKey.Load(); workerInstanceKey != nil {
+func (c *physicalTaskQueueManagerImpl) MultiSessionWorkerInstanceKey() string {
+	if workerInstanceKey := c.multiSessionWorkerInstanceKey.Load(); workerInstanceKey != nil {
 		return *workerInstanceKey
 	}
 	return ""
