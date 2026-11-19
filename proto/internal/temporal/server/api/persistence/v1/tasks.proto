@@ -34,6 +34,9 @@ message TaskInfo {
   temporal.api.common.v1.Priority priority = 10;
   // Reference to any chasm component associated with this task
   bytes component_ref = 11;
+  // Workflow type of the execution that scheduled this task. Empty for tasks created
+  // before workflow type routing was introduced and for non-workflow-task queues.
+  string workflow_type = 12;
 }
 
 // task_queue column

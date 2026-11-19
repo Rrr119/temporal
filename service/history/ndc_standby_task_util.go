@@ -214,6 +214,7 @@ type (
 		taskqueue                          *taskqueuepb.TaskQueue
 		versionDirective                   *taskqueuespb.TaskVersionDirective
 		priority                           *commonpb.Priority
+		workflowType                       string
 	}
 )
 
@@ -269,6 +270,7 @@ func newWorkflowTaskPostActionInfo(
 		taskqueue:                          taskqueue,
 		versionDirective:                   directive,
 		priority:                           priority,
+		workflowType:                       mutableState.GetExecutionInfo().WorkflowTypeName,
 	}, nil
 }
 

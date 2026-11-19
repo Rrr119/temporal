@@ -3799,6 +3799,7 @@ func (s *transferQueueActiveTaskExecutorSuite) createAddWorkflowTaskRequest(
 		ScheduleToStartTimeout: timeout,
 		Clock:                  vclock.NewVectorClock(s.mockClusterMetadata.GetClusterID(), s.mockShard.GetShardID(), task.TaskID),
 		VersionDirective:       directive,
+		WorkflowType:           &commonpb.WorkflowType{Name: executionInfo.WorkflowTypeName},
 	})
 }
 

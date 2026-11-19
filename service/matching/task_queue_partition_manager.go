@@ -454,7 +454,7 @@ func (pm *taskQueuePartitionManagerImpl) AddTask(
 
 	// spoolQueue will be nil iff task is forwarded.
 reredirectTask:
-	spoolQueue, syncMatchQueue, _, taskDispatchRevisionNumber, targetVersion, err := pm.getPhysicalQueuesForAdd(ctx, directive, params.forwardInfo, params.taskInfo.GetRunId(), params.taskInfo.GetWorkflowId(), false)
+	spoolQueue, syncMatchQueue, _, taskDispatchRevisionNumber, targetVersion, err := pm.getPhysicalQueuesForAdd(ctx, directive, params.forwardInfo, params.taskInfo.GetRunId(), params.taskInfo.GetWorkflowId(), params.taskInfo.GetWorkflowType(), false)
 	if err != nil {
 		return "", false, err
 	}
@@ -1000,6 +1000,7 @@ func (pm *taskQueuePartitionManagerImpl) AddSpooledTask(
 		nil,
 		taskInfo.GetRunId(),
 		taskInfo.GetWorkflowId(),
+		taskInfo.GetWorkflowType(),
 		false,
 	)
 	if err != nil {
@@ -1072,6 +1073,7 @@ reredirectTask:
 		nil,
 		request.GetQueryRequest().GetExecution().GetRunId(),
 		request.GetQueryRequest().GetExecution().GetWorkflowId(),
+		"",
 		true,
 	)
 	if err != nil {
@@ -1159,6 +1161,7 @@ reredirectTask:
 		// more important to allow the parent partition to make a fresh versioning decision in case the child partition
 		// did not have up-to-date User Data when selected a dispatch build ID.
 		nil,
+		"",
 		"",
 		"",
 		false)
@@ -2193,6 +2196,7 @@ func (pm *taskQueuePartitionManagerImpl) getPhysicalQueuesForAdd(
 	forwardInfo *taskqueuespb.TaskForwardInfo,
 	runId string,
 	workflowId string,
+	workflowType string,
 	isQuery bool,
 ) (
 	spoolQueue physicalTaskQueueManager,
@@ -2231,6 +2235,22 @@ func (pm *taskQueuePartitionManagerImpl) getPhysicalQueuesForAdd(
 		workflowId,
 		directive.GetUseRampingVersion(),
 	)
+	if wfBehavior != enumspb.VERSIONING_BEHAVIOR_PINNED &&
+		directive.GetUseAssignmentRules() == nil &&
+		directive.GetAssignedBuildId() == "" &&
+		workflowType != "" {
+		targetDeploymentVersion, targetDeploymentRevisionNumber = worker_versioning.FindTargetDeploymentVersionAndRevisionNumberForWorkflowTask(
+			current,
+			currentRevisionNumber,
+			ramping,
+			rampingPercentage,
+			rampingRevisionNumber,
+			workflowType,
+			workflowId,
+			directive.GetUseRampingVersion(),
+			perTypeUserData.GetWorkflowTypeRouting(),
+		)
+	}
 	targetDeployment := worker_versioning.DeploymentFromDeploymentVersion(targetDeploymentVersion)
 
 	if wfBehavior == enumspb.VERSIONING_BEHAVIOR_PINNED {

@@ -69,6 +69,7 @@ type Updater struct {
 	// newUpdateWithNexusContext is set in ApplyRequest when this request admitted a new Update that carries a
 	// Nexus serialization context. (Used in tracking metrics.)
 	newUpdateWithNexusContext bool
+	workflowType              string
 }
 
 func NewUpdater(
@@ -176,8 +177,10 @@ func (u *Updater) applyRequest(
 	if ms.IsWorkflowExecutionStatusPaused() {
 		return nil, serviceerror.NewFailedPrecondition("Workflow is paused. Cannot update the workflow.")
 	}
+	executionInfo := ms.GetExecutionInfo()
+	u.workflowType = executionInfo.WorkflowTypeName
 
-	if ms.GetExecutionInfo().WorkflowTaskAttempt >= failUpdateWorkflowTaskAttemptCount {
+	if executionInfo.WorkflowTaskAttempt >= failUpdateWorkflowTaskAttemptCount {
 		// If workflow task is constantly failing, the update to that workflow will also fail.
 		// Additionally, workflow update can't "fix" workflow state because updates (delivered with messages)
 		// are applied after events.
@@ -521,6 +524,7 @@ func (u *Updater) addWorkflowTaskToMatching(ctx context.Context) error {
 		VersionDirective:       u.directive,
 		Priority:               u.priority,
 		Stamp:                  u.workflowTaskStamp,
+		WorkflowType:           &commonpb.WorkflowType{Name: u.workflowType},
 	})
 	if err != nil {
 		return err

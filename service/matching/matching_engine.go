@@ -825,6 +825,7 @@ func (e *matchingEngineImpl) AddWorkflowTask(
 		NamespaceId:      addRequest.NamespaceId,
 		RunId:            addRequest.Execution.GetRunId(),
 		WorkflowId:       addRequest.Execution.GetWorkflowId(),
+		WorkflowType:     addRequest.GetWorkflowType().GetName(),
 		ScheduledEventId: addRequest.GetScheduledEventId(),
 		Clock:            addRequest.GetClock(),
 		ExpiryTime:       expirationTime,

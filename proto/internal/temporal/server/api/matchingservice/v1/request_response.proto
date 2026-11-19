@@ -168,6 +168,9 @@ message AddWorkflowTaskRequest {
   temporal.api.common.v1.Priority priority = 12;
   // Stamp value from when the workflow task was scheduled. Used to validate the task is still relevant.
   int32 stamp = 13;
+  // Workflow type of the execution. Used by workflow type aware version routing. Empty for
+  // requests from servers that predate workflow type routing.
+  temporal.api.common.v1.WorkflowType workflow_type = 14;
 }
 
 message AddWorkflowTaskResponse {

@@ -105,7 +105,10 @@ type TaskInfo struct {
 	Stamp    int32         `protobuf:"varint,9,opt,name=stamp,proto3" json:"stamp,omitempty"`
 	Priority *v12.Priority `protobuf:"bytes,10,opt,name=priority,proto3" json:"priority,omitempty"`
 	// Reference to any chasm component associated with this task
-	ComponentRef  []byte `protobuf:"bytes,11,opt,name=component_ref,json=componentRef,proto3" json:"component_ref,omitempty"`
+	ComponentRef []byte `protobuf:"bytes,11,opt,name=component_ref,json=componentRef,proto3" json:"component_ref,omitempty"`
+	// Workflow type of the execution that scheduled this task. Empty for tasks created
+	// before workflow type routing was introduced and for non-workflow-task queues.
+	WorkflowType  string `protobuf:"bytes,12,opt,name=workflow_type,json=workflowType,proto3" json:"workflow_type,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -215,6 +218,13 @@ func (x *TaskInfo) GetComponentRef() []byte {
 		return x.ComponentRef
 	}
 	return nil
+}
+
+func (x *TaskInfo) GetWorkflowType() string {
+	if x != nil {
+		return x.WorkflowType
+	}
+	return ""
 }
 
 // task_queue column
@@ -728,7 +738,7 @@ const file_temporal_server_api_persistence_v1_tasks_proto_rawDesc = "" +
 	"\x11AllocatedTaskInfo\x12@\n" +
 	"\x04data\x18\x01 \x01(\v2,.temporal.server.api.persistence.v1.TaskInfoR\x04data\x12\x1b\n" +
 	"\ttask_pass\x18\x03 \x01(\x03R\btaskPass\x12\x17\n" +
-	"\atask_id\x18\x02 \x01(\x03R\x06taskId\"\xac\x04\n" +
+	"\atask_id\x18\x02 \x01(\x03R\x06taskId\"\xd1\x04\n" +
 	"\bTaskInfo\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x1f\n" +
 	"\vworkflow_id\x18\x02 \x01(\tR\n" +
@@ -744,7 +754,8 @@ const file_temporal_server_api_persistence_v1_tasks_proto_rawDesc = "" +
 	"\x05stamp\x18\t \x01(\x05R\x05stamp\x12<\n" +
 	"\bpriority\x18\n" +
 	" \x01(\v2 .temporal.api.common.v1.PriorityR\bpriority\x12#\n" +
-	"\rcomponent_ref\x18\v \x01(\fR\fcomponentRef\"\x84\x05\n" +
+	"\rcomponent_ref\x18\v \x01(\fR\fcomponentRef\x12#\n" +
+	"\rworkflow_type\x18\f \x01(\tR\fworkflowType\"\x84\x05\n" +
 	"\rTaskQueueInfo\x12!\n" +
 	"\fnamespace_id\x18\x01 \x01(\tR\vnamespaceId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12A\n" +

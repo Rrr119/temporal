@@ -327,6 +327,7 @@ func (t *transferQueueActiveTaskExecutor) processWorkflowTask(
 	taskQueue, scheduleToStartTimeout := mutableState.TaskQueueScheduleToStartTimeout(transferTask.TaskQueue)
 
 	normalTaskQueueName := mutableState.GetExecutionInfo().TaskQueue
+	workflowType := mutableState.GetExecutionInfo().WorkflowTypeName
 
 	directive := MakeDirectiveForWorkflowTask(mutableState)
 	priority := mutableState.GetExecutionInfo().Priority
@@ -343,6 +344,7 @@ func (t *transferQueueActiveTaskExecutor) processWorkflowTask(
 		scheduleToStartTimeout.AsDuration(),
 		directive,
 		priority,
+		workflowType,
 		historyi.TransactionPolicyActive,
 	)
 
@@ -366,6 +368,7 @@ func (t *transferQueueActiveTaskExecutor) processWorkflowTask(
 			scheduleToStartTimeout.AsDuration(),
 			directive,
 			priority,
+			workflowType,
 			historyi.TransactionPolicyActive,
 		)
 	}

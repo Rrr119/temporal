@@ -301,6 +301,80 @@ func (this *TaskQueueTypeUserData) Equal(that interface{}) bool {
 	return proto.Equal(this, that1)
 }
 
+// Marshal an object of type WorkflowTypeRoutingData to the protobuf v3 wire format
+func (val *WorkflowTypeRoutingData) Marshal() ([]byte, error) {
+	return proto.Marshal(val)
+}
+
+// Unmarshal an object of type WorkflowTypeRoutingData from the protobuf v3 wire format
+func (val *WorkflowTypeRoutingData) Unmarshal(buf []byte) error {
+	return proto.Unmarshal(buf, val)
+}
+
+// Size returns the size of the object, in bytes, once serialized
+func (val *WorkflowTypeRoutingData) Size() int {
+	return proto.Size(val)
+}
+
+// Equal returns whether two WorkflowTypeRoutingData values are equivalent by recursively
+// comparing the message's fields.
+// For more information see the documentation for
+// https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
+func (this *WorkflowTypeRoutingData) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	var that1 *WorkflowTypeRoutingData
+	switch t := that.(type) {
+	case *WorkflowTypeRoutingData:
+		that1 = t
+	case WorkflowTypeRoutingData:
+		that1 = &t
+	default:
+		return false
+	}
+
+	return proto.Equal(this, that1)
+}
+
+// Marshal an object of type WorkflowTypeRoutingRule to the protobuf v3 wire format
+func (val *WorkflowTypeRoutingRule) Marshal() ([]byte, error) {
+	return proto.Marshal(val)
+}
+
+// Unmarshal an object of type WorkflowTypeRoutingRule from the protobuf v3 wire format
+func (val *WorkflowTypeRoutingRule) Unmarshal(buf []byte) error {
+	return proto.Unmarshal(buf, val)
+}
+
+// Size returns the size of the object, in bytes, once serialized
+func (val *WorkflowTypeRoutingRule) Size() int {
+	return proto.Size(val)
+}
+
+// Equal returns whether two WorkflowTypeRoutingRule values are equivalent by recursively
+// comparing the message's fields.
+// For more information see the documentation for
+// https://pkg.go.dev/google.golang.org/protobuf/proto#Equal
+func (this *WorkflowTypeRoutingRule) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	var that1 *WorkflowTypeRoutingRule
+	switch t := that.(type) {
+	case *WorkflowTypeRoutingRule:
+		that1 = t
+	case WorkflowTypeRoutingRule:
+		that1 = &t
+	default:
+		return false
+	}
+
+	return proto.Equal(this, that1)
+}
+
 // Marshal an object of type TaskQueueUserData to the protobuf v3 wire format
 func (val *TaskQueueUserData) Marshal() ([]byte, error) {
 	return proto.Marshal(val)

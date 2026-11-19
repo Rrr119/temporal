@@ -151,6 +151,7 @@ func (t *transferQueueTaskExecutorBase) pushWorkflowTask(
 	workflowTaskScheduleToStartTimeout time.Duration,
 	directive *taskqueuespb.TaskVersionDirective,
 	priority *commonpb.Priority,
+	workflowType string,
 	transactionPolicy historyi.TransactionPolicy,
 ) error {
 	var sst *durationpb.Duration
@@ -170,6 +171,7 @@ func (t *transferQueueTaskExecutorBase) pushWorkflowTask(
 		VersionDirective:       directive,
 		Priority:               priority,
 		Stamp:                  task.Stamp,
+		WorkflowType:           &commonpb.WorkflowType{Name: workflowType},
 	})
 	if _, isNotFound := err.(*serviceerror.NotFound); isNotFound {
 		// NotFound error is not expected for AddTasks calls

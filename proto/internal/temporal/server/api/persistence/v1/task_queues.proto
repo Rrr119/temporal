@@ -127,6 +127,37 @@ message TaskQueueTypeUserData {
 
   // Deprecated. Retained for compatibility with older servers during rolling upgrades.
   temporal.server.api.enums.v1.FairnessState fairness_state = 3 [deprecated = true];
+
+  // Workflow-type-specific version routing rules for the task queue.
+  WorkflowTypeRoutingData workflow_type_routing = 4;
+}
+
+// WorkflowTypeRoutingData holds the ordered history of workflow-type routing rule changes.
+// Rules are add-only. Replacing or rolling back a rule appends a tombstone followed by a new
+// active rule, so older servers and replayed state can still reconstruct the previous target.
+message WorkflowTypeRoutingData {
+  // Monotonically increasing revision used to merge concurrent updates.
+  int64 revision_number = 1;
+  // Ordered list of rule changes. The last active rule for a workflow type is authoritative.
+  repeated WorkflowTypeRoutingRule rules = 2;
+}
+
+message WorkflowTypeRoutingRule {
+  // Workflow type this rule applies to. Empty is not a valid rule.
+  string workflow_type = 1;
+  // Target deployment version. Nil routes matching executions to the unversioned queue.
+  temporal.server.api.deployment.v1.WorkerDeploymentVersion deployment_version = 2;
+  // Percentage of matching executions routed to the target version instead of the task queue's
+  // current version. Valid range is [0, 100].
+  float percentage = 3;
+  // Time this rule was created.
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: Using HLC instead of wall clock. --)
+  temporal.server.api.clock.v1.HybridLogicalClock create_timestamp = 4;
+  // Time this rule was deleted. Nil while the rule is active.
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: Using HLC instead of wall clock. --)
+  temporal.server.api.clock.v1.HybridLogicalClock delete_timestamp = 5;
 }
 
 // Container for all persistent user provided data for a task queue family.

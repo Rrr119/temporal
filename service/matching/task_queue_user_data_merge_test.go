@@ -650,6 +650,55 @@ func newTestRoutingConfig(revision int64, buildID string) *deploymentpb.RoutingC
 	}
 }
 
+func TestMergeTaskQueueUserDataWorkflowTypeRoutingRevisionSelection(t *testing.T) {
+	t.Parallel()
+
+	userData := func(revision int64, percentage float32) *persistencespb.TaskQueueUserData {
+		return &persistencespb.TaskQueueUserData{
+			PerType: map[int32]*persistencespb.TaskQueueTypeUserData{
+				int32(enumspb.TASK_QUEUE_TYPE_WORKFLOW): {
+					WorkflowTypeRouting: &persistencespb.WorkflowTypeRoutingData{
+						RevisionNumber: revision,
+						Rules: []*persistencespb.WorkflowTypeRoutingRule{{
+							WorkflowType: "workflow",
+							Percentage:   percentage,
+						}},
+					},
+				},
+			},
+		}
+	}
+
+	tests := []struct {
+		name          string
+		baseRevision  int64
+		otherRevision int64
+		wantRevision  int64
+		wantConflicts int
+	}{
+		{name: "other higher revision wins", baseRevision: 1, otherRevision: 2, wantRevision: 2},
+		{name: "base higher revision wins", baseRevision: 2, otherRevision: 1, wantRevision: 2},
+		{name: "equal revision keeps base and records conflict", baseRevision: 1, otherRevision: 1, wantRevision: 1, wantConflicts: 1},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			merged, conflicts := mergeTaskQueueUserDataDeployments(
+				userData(tc.baseRevision, 10),
+				userData(tc.otherRevision, 20),
+			)
+			routing := merged.GetPerType()[int32(enumspb.TASK_QUEUE_TYPE_WORKFLOW)].GetWorkflowTypeRouting()
+			require.Equal(t, tc.wantRevision, routing.GetRevisionNumber())
+			require.Len(t, conflicts, tc.wantConflicts)
+			if tc.wantConflicts > 0 {
+				require.Equal(t, taskQueueUserDataMergeConflictTypeWorkflowTypeRouting, conflicts[0].conflictType)
+			}
+		})
+	}
+}
+
 func newTestWorkerDeploymentVersionData(
 	revision int64,
 	status enumspb.WorkerDeploymentVersionStatus,

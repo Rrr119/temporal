@@ -12,8 +12,9 @@ type taskQueueUserDataMergeConflictType string
 type taskQueueUserDataSelectionReason string
 
 const (
-	taskQueueUserDataMergeConflictTypeRoutingConfig taskQueueUserDataMergeConflictType = "routing_config"
-	taskQueueUserDataMergeConflictTypeVersionData   taskQueueUserDataMergeConflictType = "version_data"
+	taskQueueUserDataMergeConflictTypeRoutingConfig       taskQueueUserDataMergeConflictType = "routing_config"
+	taskQueueUserDataMergeConflictTypeVersionData         taskQueueUserDataMergeConflictType = "version_data"
+	taskQueueUserDataMergeConflictTypeWorkflowTypeRouting taskQueueUserDataMergeConflictType = "workflow_type_routing"
 
 	taskQueueUserDataSelectionReasonCurrentParentClock  taskQueueUserDataSelectionReason = "current_parent_clock"
 	taskQueueUserDataSelectionReasonIncomingParentClock taskQueueUserDataSelectionReason = "incoming_parent_clock"
@@ -84,6 +85,11 @@ func mergeTaskQueueUserDataDeployments(
 
 	var conflicts []taskQueueUserDataMergeConflict
 	for taskQueueType, otherPerType := range otherUserData.GetPerType() {
+		conflicts = append(
+			conflicts,
+			mergeWorkflowTypeRoutingIntoBase(merged, taskQueueType, otherPerType.GetWorkflowTypeRouting())...,
+		)
+
 		otherDeployments := otherPerType.GetDeploymentData().GetDeploymentsData()
 		if len(otherDeployments) == 0 {
 			continue
@@ -115,10 +121,51 @@ func mergeTaskQueueUserDataDeployments(
 	return merged, conflicts
 }
 
+func mergeWorkflowTypeRoutingIntoBase(
+	data *persistencespb.TaskQueueUserData,
+	taskQueueType int32,
+	other *persistencespb.WorkflowTypeRoutingData,
+) []taskQueueUserDataMergeConflict {
+	if other == nil {
+		return nil
+	}
+
+	base := ensureTaskQueueTypeUserData(data, taskQueueType)
+	if base.WorkflowTypeRouting == nil {
+		base.WorkflowTypeRouting = common.CloneProto(other)
+		return nil
+	}
+
+	selected, conflict := selectRevisionedProto(base.WorkflowTypeRouting, other)
+	base.WorkflowTypeRouting = selected
+	if !conflict {
+		return nil
+	}
+	return []taskQueueUserDataMergeConflict{{
+		conflictType:   taskQueueUserDataMergeConflictTypeWorkflowTypeRouting,
+		taskQueueType:  taskQueueType,
+		revisionNumber: selected.GetRevisionNumber(),
+	}}
+}
+
 func ensureDeploymentsData(
 	data *persistencespb.TaskQueueUserData,
 	taskQueueType int32,
 ) map[string]*persistencespb.WorkerDeploymentData {
+	perType := ensureTaskQueueTypeUserData(data, taskQueueType)
+	if perType.DeploymentData == nil {
+		perType.DeploymentData = &persistencespb.DeploymentData{}
+	}
+	if perType.DeploymentData.DeploymentsData == nil {
+		perType.DeploymentData.DeploymentsData = make(map[string]*persistencespb.WorkerDeploymentData)
+	}
+	return perType.DeploymentData.DeploymentsData
+}
+
+func ensureTaskQueueTypeUserData(
+	data *persistencespb.TaskQueueUserData,
+	taskQueueType int32,
+) *persistencespb.TaskQueueTypeUserData {
 	if data.PerType == nil {
 		data.PerType = make(map[int32]*persistencespb.TaskQueueTypeUserData)
 	}
@@ -127,13 +174,7 @@ func ensureDeploymentsData(
 		perType = &persistencespb.TaskQueueTypeUserData{}
 		data.PerType[taskQueueType] = perType
 	}
-	if perType.DeploymentData == nil {
-		perType.DeploymentData = &persistencespb.DeploymentData{}
-	}
-	if perType.DeploymentData.DeploymentsData == nil {
-		perType.DeploymentData.DeploymentsData = make(map[string]*persistencespb.WorkerDeploymentData)
-	}
-	return perType.DeploymentData.DeploymentsData
+	return perType
 }
 
 func cloneWorkerDeploymentData(data *persistencespb.WorkerDeploymentData) *persistencespb.WorkerDeploymentData {

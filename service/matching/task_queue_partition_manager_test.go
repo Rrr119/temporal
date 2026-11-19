@@ -1132,6 +1132,54 @@ func (s *PartitionManagerTestSuite) addRoutingConfigUserData(deploymentName, cur
 	}
 }
 
+func (s *PartitionManagerTestSuite) TestWorkflowTypeRoutingSelectsVersionedQueue() {
+	s.addRoutingConfigUserData("deployment", "current", "", 0)
+	perType := s.userDataMgr.data.Data.PerType[int32(enumspb.TASK_QUEUE_TYPE_WORKFLOW)]
+	deployment := perType.DeploymentData.DeploymentsData["deployment"]
+	deployment.RoutingConfig.RevisionNumber = 1
+	deployment.Versions["canary"] = &deploymentspb.WorkerDeploymentVersionData{RevisionNumber: 2}
+	perType.WorkflowTypeRouting = &persistencespb.WorkflowTypeRoutingData{
+		RevisionNumber: 3,
+		Rules: []*persistencespb.WorkflowTypeRoutingRule{{
+			WorkflowType: "workflow-type",
+			DeploymentVersion: &deploymentspb.WorkerDeploymentVersion{
+				DeploymentName: "deployment",
+				BuildId:        "canary",
+			},
+			Percentage:      100,
+			CreateTimestamp: hlc.Zero(1),
+		}},
+	}
+
+	tests := []struct {
+		name         string
+		workflowType string
+		wantBuildID  string
+		wantRevision int64
+	}{
+		{name: "matching workflow type", workflowType: "workflow-type", wantBuildID: "canary", wantRevision: 3},
+		{name: "other workflow type", workflowType: "other-type", wantBuildID: "current", wantRevision: 1},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			_, syncMatchQueue, _, revision, targetVersion, err := s.partitionMgr.getPhysicalQueuesForAdd(
+				context.Background(),
+				&taskqueuespb.TaskVersionDirective{Behavior: enumspb.VERSIONING_BEHAVIOR_AUTO_UPGRADE},
+				nil,
+				"run-id",
+				"workflow-id",
+				tc.workflowType,
+				false,
+			)
+			s.Require().NoError(err)
+			s.Equal(tc.wantBuildID, syncMatchQueue.QueueKey().Version().Deployment().GetBuildId())
+			s.Equal(tc.wantBuildID, targetVersion.GetBuildId())
+			s.Equal(tc.wantRevision, revision)
+		})
+	}
+}
+
 // spoolDefaultTasks spools n tasks to the partition manager's default queue.
 func (s *PartitionManagerTestSuite) spoolDefaultTasks(pm *taskQueuePartitionManagerImpl, n int) {
 	dQueue := pm.defaultQueue()

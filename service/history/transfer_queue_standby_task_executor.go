@@ -735,6 +735,7 @@ func (t *transferQueueStandbyTaskExecutor) pushWorkflowTask(
 		pushwtInfo.workflowTaskScheduleToStartTimeout,
 		pushwtInfo.versionDirective,
 		pushwtInfo.priority,
+		pushwtInfo.workflowType,
 		historyi.TransactionPolicyPassive,
 	)
 }

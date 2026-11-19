@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
@@ -99,6 +100,7 @@ func (f *priForwarder) ForwardTask(ctx context.Context, task *internalTask) erro
 				VersionDirective:       task.event.Data.GetVersionDirective(),
 				Stamp:                  task.event.Data.GetStamp(),
 				Priority:               task.event.Data.GetPriority(),
+				WorkflowType:           &commonpb.WorkflowType{Name: task.event.Data.GetWorkflowType()},
 			},
 		)
 	case enumspb.TASK_QUEUE_TYPE_ACTIVITY:
